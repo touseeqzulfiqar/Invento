@@ -6,10 +6,10 @@ import {
   FlatList,
   TextInput as RNTextInput,
   Modal,
+  TouchableOpacity,
+  Image,
 } from "react-native";
 import { auth, db } from "../firebase";
-import MyButton from "@/components/MyButton";
-import MyIconButton from "@/components/MyIconButton";
 import { router } from "expo-router";
 import {
   collection,
@@ -21,17 +21,21 @@ import {
   getDoc,
 } from "firebase/firestore";
 import Icon from "react-native-vector-icons/FontAwesome";
+import * as ImagePicker from "expo-image-picker";
+import MyButton from "@/components/MyButton";
 
 const Home = () => {
-  const [product, setProduct] = useState("");
-  const [productsList, setProductsList] = useState([]);
-  const [editingProductId, setEditingProductId] = useState(null);
-  const [editedProductName, setEditedProductName] = useState("");
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [productToDelete, setProductToDelete] = useState(null);
+  const [product, setProduct] = useState<string>("");
+  const [productImage, setProductImage] = useState<string | null>(null); // Allow null
+  const [productsList, setProductsList] = useState<any[]>([]);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null); // Allow null
+  const [editedProductName, setEditedProductName] = useState<string>("");
+  const [editedProductImage, setEditedProductImage] = useState<string | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
+  const [productToDelete, setProductToDelete] = useState<string | null>(null); // Allow null
   const userId = auth.currentUser?.uid;
 
-  const handleSignOut = () => {
+  const handleLogout = () => {
     auth
       .signOut()
       .then(() => {
@@ -41,17 +45,21 @@ const Home = () => {
   };
 
   const addProductToFirestore = async () => {
-    if (product.trim()) {
+    if (product.trim() && productImage) {
       try {
         await addDoc(collection(db, "products"), {
           name: product,
+          image: productImage,
           createdAt: new Date(),
           ownerId: userId,
         });
         setProduct("");
+        setProductImage(null); // Reset the image after adding
       } catch (error) {
         alert(error.message);
       }
+    } else {
+      alert("Please provide both a product name and image.");
     }
   };
 
@@ -67,7 +75,7 @@ const Home = () => {
     return () => unsubscribe();
   }, []);
 
-  const deleteProduct = async (id) => {
+  const deleteProduct = async (id: string) => {
     const productRef = doc(db, "products", id);
     const productDoc = await getDoc(productRef);
 
@@ -83,7 +91,7 @@ const Home = () => {
     }
   };
 
-  const confirmDelete = (id, ownerId) => {
+  const confirmDelete = (id: string, ownerId: string) => {
     if (ownerId !== userId) {
       alert("You can only delete your own products.");
       return;
@@ -92,26 +100,46 @@ const Home = () => {
     setShowDeleteModal(true);
   };
 
-  const updateProduct = async (id) => {
+  const updateProduct = async (id: string) => {
     try {
       await updateDoc(doc(db, "products", id), {
         name: editedProductName,
+        image: editedProductImage,
       });
       setEditingProductId(null);
       setEditedProductName("");
+      setEditedProductImage(null); // Reset the image after editing
     } catch (error) {
       alert(error.message);
     }
   };
 
-  const openEditModal = (id, name) => {
+  const openEditModal = (id: string, name: string, image: string) => {
     setEditingProductId(id);
     setEditedProductName(name);
+    setEditedProductImage(image);
   };
+
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      setProductImage(result.assets[0].uri);
+    }
+  };
+
 
   return (
     <View style={styles.container}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <TouchableOpacity onPress={pickImage}>
+          <Icon name="image" size={25} />
+        </TouchableOpacity>
         <RNTextInput
           placeholder="Enter Product Name"
           style={styles.input}
@@ -119,33 +147,36 @@ const Home = () => {
           onChangeText={setProduct}
           onSubmitEditing={addProductToFirestore}
         />
-        <MyIconButton size={25} icon="plus" onPress={addProductToFirestore} />
       </View>
+
+      {productImage && (
+        <Image source={{ uri: productImage }} style={styles.imagePreview} />
+      )}
+
       <FlatList
         data={productsList}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View style={styles.productItem}>
-            <Icon name="check" size={20} color="#4CAF50" />
+            <Image source={{ uri: item.image }} style={styles.productImage} />
             <Text style={styles.productText}>{item.name}</Text>
             {item.ownerId === userId && (
               <View style={styles.actionButtons}>
-                <MyIconButton
-                  size={15}
-                  icon="edit"
-                  onPress={() => openEditModal(item.id, item.name)}
-                />
-                <MyIconButton
-                  icon="trash"
-                  size={15}
+                <TouchableOpacity
+                  onPress={() => openEditModal(item.id, item.name, item.image)}
+                >
+                  <Icon name="edit" size={20} />
+                </TouchableOpacity>
+                <TouchableOpacity
                   onPress={() => confirmDelete(item.id, item.ownerId)}
-                />
+                >
+                  <Icon name="trash" size={20} />
+                </TouchableOpacity>
               </View>
             )}
           </View>
         )}
       />
-      <MyButton title="Logout" onPress={handleSignOut} />
 
       <Modal
         animationType="slide"
@@ -158,16 +189,16 @@ const Home = () => {
             <Text style={styles.modalTitle}>Confirm Delete</Text>
             <Text>Are you sure you want to delete this product?</Text>
             <View style={styles.modalButtons}>
-              <MyButton
-                title="Delete"
+              <TouchableOpacity
                 onPress={() => {
                   if (productToDelete) deleteProduct(productToDelete);
                 }}
-              />
-              <MyButton
-                title="Cancel"
-                onPress={() => setShowDeleteModal(false)}
-              />
+              >
+                <Text>Delete</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowDeleteModal(false)}>
+                <Text>Cancel</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -182,26 +213,35 @@ const Home = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Edit Product</Text>
-            <RNTextInput
-              style={styles.modalInput}
-              value={editedProductName}
-              onChangeText={setEditedProductName}
-            />
+            <View style={styles.modalInputContainer}>
+              <RNTextInput
+                style={styles.modalInput}
+                value={editedProductName}
+                onChangeText={setEditedProductName}
+              />
+            </View>
+            {editedProductImage && (
+              <Image
+                source={{ uri: editedProductImage }}
+                style={styles.imagePreview}
+              />
+            )}
             <View style={styles.modalButtons}>
-              <MyButton
-                title="Save"
+              <TouchableOpacity
                 onPress={() => {
-                  updateProduct(editingProductId);
+                  updateProduct(editingProductId!);
                 }}
-              />
-              <MyButton
-                title="Cancel"
-                onPress={() => setEditingProductId(null)}
-              />
+              >
+                <Text>Save</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setEditingProductId(null)}>
+                <Text>Cancel</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
+      <MyButton title={"Logout"} onPress={handleLogout} />
     </View>
   );
 };
@@ -210,8 +250,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
+    // alignItems: "center",
+    rowGap: 20,
+    paddingRight: 50,
+    paddingLeft: 20,
+    paddingTop: 50,
   },
   input: {
     borderWidth: 1,
@@ -220,21 +263,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     width: "100%",
   },
+  imagePreview: {
+    width: 100,
+    height: 100,
+    borderRadius: 10,
+    marginVertical: 10,
+  },
   productItem: {
     flexDirection: "row",
     alignItems: "center",
     padding: 10,
     justifyContent: "space-between",
   },
+  productImage: {
+    width: 100,
+    height: 80,
+    borderRadius: 5,
+    marginRight: 10,
+  },
   productText: {
-    marginLeft: 10,
     flex: 1,
+    fontFamily: "sans-serif",
+    fontStyle: "italic",
+    fontSize: 16,
+    marginLeft: 10,
+    marginRight: 10,
   },
   actionButtons: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    marginLeft: 10,
+    gap: 10,
   },
   modalOverlay: {
     flex: 1,
@@ -242,12 +300,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
+  modalInputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "90%",
+    justifyContent: "space-between",
+    gap: 5,
+  },
   modalContent: {
     width: "90%",
     backgroundColor: "white",
     borderRadius: 10,
     padding: 20,
     alignItems: "center",
+    elevation: 5,
   },
   modalTitle: {
     fontSize: 18,
@@ -258,14 +324,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     height: 50,
     borderRadius: 10,
-    paddingHorizontal: 10,
+    paddingHorizontal: 20,
     width: "100%",
-    marginBottom: 20,
+    marginBottom: 10,
   },
   modalButtons: {
     flexDirection: "row",
+    padding: 15,
+    justifyContent: "space-between",
     width: "100%",
-    gap: 10,
   },
 });
 
